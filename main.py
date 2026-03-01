@@ -1,106 +1,142 @@
-import streamlit as st
+import customtkinter as ctk
 from supabase import create_client
-import qrcode, pytz
+import qrcode
 from PIL import Image, ImageDraw, ImageFont
 from fpdf import FPDF
-from datetime import datetime
+import os
+import win32print
+import win32api
+import tkinter.messagebox as messagebox
 
-# CREDENCIAIS DIRETAS - JOAO VITOR
+# CREDENCIAIS DIRETAS DO JOÃO VITOR
 URL_DB = "https://vbrpgqpjujedxkughbgp.supabase.co"
 KEY_DB = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZicnBncXBqdWplZHhrdWdoYmdwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzNjQwMTMsImV4cCI6MjA4Nzk0MDAxM30.6chioJKrO2gs0W8aWp_XxJlXVZoZhJW8libvlKB8giA"
 
-st.set_page_config(page_title="Gerador QR - J.V.C.L. Silva", layout="wide")
+class AppGerador(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Gerador LPN Professional - Joao Vitor Silva")
+        self.geometry("1100x700")
+        
+        # Conexão ao Supabase
+        try:
+            self.db = create_client(URL_DB, KEY_DB)
+            self.prox_cod = self.buscar_ultimo() + 1
+        except:
+            messagebox.showerror("Erro", "Falha ao conectar ao banco de dados!")
+            self.prox_cod = 1
 
-# Cabeçalho com Nome Completo e Destaque
-st.markdown("""<style>.dev{font-size:16px;color:white;background:#4A90E2;padding:10px;border-radius:5px;margin-bottom:20px;font-weight:bold;}</style>
-<div class="dev">Desenvolvido por: Joao Vitor de Campos Leandro Silva | 2026</div>""", unsafe_allow_html=True)
+        # Layout
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-def conectar():
-    try: return create_client(URL_DB, KEY_DB)
-    except: return None
-db = conectar()
+        # Sidebar
+        self.sidebar = ctk.CTkFrame(self, width=240, corner_radius=0)
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        
+        ctk.CTkLabel(self.sidebar, text="LOGÍSTICA LPN", font=("Arial", 22, "bold")).pack(pady=20)
+        
+        # Menu de Impressoras
+        ctk.CTkLabel(self.sidebar, text="Impressora Ativa:", font=("Arial", 12)).pack(pady=(10,0))
+        try:
+            self.lista_printers = [p[2] for p in win32print.EnumPrinters(2)]
+            self.combo_printers = ctk.CTkComboBox(self.sidebar, values=self.lista_printers, width=200)
+            self.combo_printers.pack(pady=5, padx=20)
+            self.combo_printers.set(win32print.GetDefaultPrinter())
+        except:
+            ctk.CTkLabel(self.sidebar, text="Nenhuma impressora encontrada", text_color="red").pack()
 
-def buscar_ultimo():
-    try:
-        r = db.table("registros_etiquetas").select("fim").order("fim",desc=True).limit(1).execute()
-        return int(r.data[0]['fim']) if r.data else 0
-    except: return 0
+        # Botões
+        ctk.CTkButton(self.sidebar, text="Lote Automático", command=self.tela_auto).pack(pady=10, padx=20)
+        ctk.CTkButton(self.sidebar, text="Manual / Lista", command=self.tela_manual).pack(pady=10, padx=20)
+        ctk.CTkButton(self.sidebar, text="Etiqueta Larga", command=self.tela_larga).pack(pady=10, padx=20)
+        
+        ctk.CTkLabel(self.sidebar, text="v2.0 | 2026", font=("Arial", 10)).pack(side="bottom", pady=10)
+        ctk.CTkLabel(self.sidebar, text="João Vitor C. L. Silva", font=("Arial", 10, "italic")).pack(side="bottom")
 
-def f_pad(t):
-    qr = qrcode.QRCode(box_size=12, border=1)
-    qr.add_data(str(t)); qr.make(fit=True)
-    img = qr.make_image().convert('RGB')
-    cv = Image.new('RGB', (img.size[0]+300, img.size[1]+120), 'white')
-    d = ImageDraw.Draw(cv)
-    try: f=ImageFont.truetype("arialbd.ttf",60)
-    except: f=ImageFont.load_default()
-    d.text((150,20),str(t),fill="black",font=f)
-    cv.paste(img,(130,100))
-    return cv
+        # Container Central
+        self.container = ctk.CTkFrame(self, corner_radius=15)
+        self.container.grid(row=0, column=1, padx=20, pady=20, sticky="nsew")
+        self.tela_auto()
 
-def f_lg(li):
-    cv = Image.new('RGB', (3150, 800), 'white')
-    d = ImageDraw.Draw(cv)
-    try: 
-        ft=ImageFont.truetype("arialbd.ttf",80)
-        fc=ImageFont.truetype("arialbd.ttf",45)
-    except: ft=fc=ImageFont.load_default()
-    if li and '.' in str(li[0]):
-        p = str(li[0]).split('.')
-        tit = f"RUA {p[0]} POSICAO {p[1]}"
-        d.text(((3150-d.textlength(tit,font=ft))/2,25),tit,fill="black",font=ft)
-    w = 3150/7
-    for i in range(1,7): d.line([(i*w,120),(i*w,780)],fill="black",width=10)
-    for i, c in enumerate(li[:7]):
-        qr = qrcode.QRCode(box_size=13, border=2); qr.add_data(str(c)); qr.make(fit=True)
-        qi = qr.make_image().convert('RGB')
-        xf = (i*w)+(w-qi.size[0])/2
-        tw = d.textlength(str(c), font=fc)
-        d.text(((i*w)+(w-tw)/2, 160), str(c), fill="black", font=fc)
-        cv.paste(qi,(int(xf),250))
-    return cv
+    def buscar_ultimo(self):
+        try:
+            r = self.db.table("registros_etiquetas").select("fim").order("fim", desc=True).limit(1).execute()
+            return int(r.data[0]['fim']) if r.data else 0
+        except: return 0
 
-px = buscar_ultimo() + 1
-st.metric("Próximo Código", f"{px:08d}")
-t1,t2,t3,t4 = st.tabs(["Auto","Manual","Lista","Larga"])
+    def f_pad(self, t):
+        qr = qrcode.QRCode(box_size=12, border=1)
+        qr.add_data(str(t)); qr.make(fit=True)
+        img = qr.make_image().convert('RGB')
+        cv = Image.new('RGB', (img.size[0]+300, img.size[1]+120), 'white')
+        d = ImageDraw.Draw(cv)
+        try: f=ImageFont.truetype("arialbd.ttf", 60)
+        except: f=ImageFont.load_default()
+        d.text((150,20), str(t), fill="black", font=f)
+        cv.paste(img, (130, 100))
+        return cv
 
-with t1:
-    q = st.number_input("Qtd:", 1, 200, 10, key="ka")
-    st.image(f_pad(f"{px:08d}"), width=400)
-    if st.button("GERAR LOTE", key="ba"):
+    def imprimir_direto(self, caminho):
+        try:
+            win32print.SetDefaultPrinter(self.combo_printers.get())
+            win32api.ShellExecute(0, "print", caminho, None, ".", 0)
+        except Exception as e:
+            messagebox.showerror("Erro Impressão", str(e))
+
+    def limpar(self):
+        for w in self.container.winfo_children(): w.destroy()
+
+    # --- TELA 1: AUTOMÁTICO ---
+    def tela_auto(self):
+        self.limpar()
+        ctk.CTkLabel(self.container, text="Gerar Sequência Automática", font=("Arial", 24, "bold")).pack(pady=20)
+        ctk.CTkLabel(self.container, text=f"Código Inicial (Banco): {self.prox_cod:08d}", text_color="#4A90E2").pack()
+        
+        self.ent_qtd = ctk.CTkEntry(self.container, placeholder_text="Qtd de Etiquetas", width=200)
+        self.ent_qtd.pack(pady=20)
+        
+        ctk.CTkButton(self.container, text="GERAR E IMPRIMIR LOTE", fg_color="#4A90E2", height=40, command=self.acao_auto).pack()
+
+    def acao_auto(self):
+        try:
+            q = int(self.ent_qtd.get())
+            ini, fim = self.prox_cod, self.prox_cod + q - 1
+            pdf = FPDF('L','mm',(65,100))
+            for i in range(q):
+                pdf.add_page(); pdf.image(self.f_pad(f"{(ini+i):08d}"), 5, 5, 90)
+            pdf.output("temp.pdf")
+            self.db.table("registros_etiquetas").insert({"inicio":ini,"fim":fim,"quantidade":q}).execute()
+            if messagebox.askyesno("Imprimir", "Deseja imprimir agora?"): self.imprimir_direto("temp.pdf")
+            self.prox_cod = fim + 1
+            self.tela_auto()
+        except: messagebox.showerror("Erro", "Insira uma quantidade válida")
+
+    # --- TELA 2: MANUAL / LISTA ---
+    def tela_manual(self):
+        self.limpar()
+        ctk.CTkLabel(self.container, text="Lista de Códigos Personalizados", font=("Arial", 24, "bold")).pack(pady=20)
+        self.txt_manual = ctk.CTkTextbox(self.container, width=500, height=300)
+        self.txt_manual.pack(pady=10)
+        ctk.CTkButton(self.container, text="GERAR E IMPRIMIR LISTA", fg_color="#2ECC71", height=40, command=self.acao_manual).pack()
+
+    def acao_manual(self):
+        cods = [c.strip() for c in self.txt_manual.get("1.0", "end").split("\n") if c.strip()]
+        if not cods: return
         pdf = FPDF('L','mm',(65,100))
-        for i in range(q):
-            pdf.add_page(); pdf.image(f_pad(f"{(px+i):08d}"),5,5,90)
-        db.table("registros_etiquetas").insert({"inicio":px,"fim":px+q-1,"quantidade":q}).execute()
-        st.download_button("Download", bytes(pdf.output()), "lote.pdf", key="da")
+        for c in cods:
+            pdf.add_page(); pdf.image(self.f_pad(c), 5, 5, 90)
+        pdf.output("temp_man.pdf")
+        if messagebox.askyesno("Imprimir", "Enviar lista para impressora?"): self.imprimir_direto("temp_man.pdf")
 
-with t2:
-    m = st.text_input("Código:", key="km")
-    if m:
-        st.image(f_pad(m), width=400)
-        if st.button("GERAR MANUAL", key="bm"):
-            p2 = FPDF('L','mm',(65,100)); p2.add_page(); p2.image(f_pad(m),5,5,90)
-            st.download_button("Download", bytes(p2.output()), "manual.pdf", key="dm")
+    # --- TELA 3: LARGA ---
+    def tela_larga(self):
+        self.limpar()
+        ctk.CTkLabel(self.container, text="Etiqueta Larga (7 QRs - 31.5cm)", font=("Arial", 24, "bold")).pack(pady=20)
+        self.txt_larga = ctk.CTkTextbox(self.container, width=500, height=200)
+        self.txt_larga.pack(pady=10)
+        ctk.CTkButton(self.container, text="GERAR LARGA", fg_color="#E67E22", height=40, command=lambda: messagebox.showinfo("Aviso", "Ajuste o papel térmico para 315mm")).pack()
 
-with t3:
-    ls = st.text_area("Lista:", key="kl")
-    if ls:
-        cs = [c.strip() for c in ls.split("\n") if c.strip()]
-        if cs:
-            st.image(f_pad(cs[0]), width=400)
-            if st.button("GERAR LISTA", key="bl"):
-                p3 = FPDF('L','mm',(65,100))
-                for c in cs: p3.add_page(); p3.image(f_pad(c),5,5,90)
-                st.download_button("Download", bytes(p3.output()), "lista.pdf", key="dl")
-
-with t4:
-    lg = st.text_area("Códigos (7 por folha):", key="klg")
-    if lg:
-        it = [e.strip() for e in lg.split("\n") if e.strip()]
-        if it:
-            st.image(f_lg(it[:7]), use_container_width=True)
-            if st.button("GERAR LARGA", key="blg"):
-                p4 = FPDF('L','mm',(80,315))
-                for i in range(0,len(it),7):
-                    p4.add_page(); p4.image(f_lg(it[i:i+7]),0,0,315,80)
-                st.download_button("Download", bytes(p4.output()), "larga.pdf", key="dlg")
+if __name__ == "__main__":
+    app = AppGerador()
+    app.mainloop()
